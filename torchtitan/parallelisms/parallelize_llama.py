@@ -125,10 +125,18 @@ def parallelize_llama(
             logger.info("Applied Context Parallel to the model")
     elif parallel_dims.dp_replicate_enabled:
         if world_mesh.ndim > 1:
-            raise RuntimeError("DDP has not supported > 1D parallelism")
+            print("oof")
+        dp_mesh_dim_names = (
+                ("dp",)
+        )
+        dp_mesh = (
+                world_mesh[(*dp_mesh_dim_names, "cp")]._flatten("dp_cp")
+                if parallel_dims.cp_enabled
+                else world_mesh[dp_mesh_dim_names]
+        )
         apply_ddp(
             model,
-            world_mesh,
+            dp_mesh,
             enable_compile=job_config.training.compile,
             enable_compiled_autograd=job_config.experimental.enable_compiled_autograd,
         )
