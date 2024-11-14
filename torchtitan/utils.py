@@ -180,6 +180,7 @@ def init_distributed(job_config):
     torch.distributed.init_process_group(
         backend=backend,
         timeout=timedelta(seconds=job_config.comm.init_timeout_seconds),
+        #device_id=torch.device("cuda:0"),
     )
 
 
