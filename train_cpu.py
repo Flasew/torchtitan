@@ -62,8 +62,7 @@ def main(job_config: JobConfig):
         world_size=world_size,
         enable_loss_parallel=job_config.training.enable_loss_parallel,
     )
-    device = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
-    torch.cuda.set_device(device)
+    device = torch.device(f"cpu")
     utils.init_distributed(job_config)
     # initialize GPU memory monitor and get peak flops for MFU calculation
     gpu_memory_monitor = build_gpu_memory_monitor()
@@ -71,7 +70,7 @@ def main(job_config: JobConfig):
     logger.info(f"Peak FLOPS used for computing MFU: {gpu_peak_flops:.3e}")
 
     # build meshes
-    world_mesh = parallel_dims.build_mesh(device_type="cuda")
+    world_mesh = parallel_dims.build_mesh(device_type="cpu")
     if parallel_dims.dp_enabled:
         dp_mesh = world_mesh["dp"]
         dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
@@ -146,9 +145,9 @@ def main(job_config: JobConfig):
         buffer_device = None
     elif job_config.training.enable_cpu_offload:
         init_device = "cpu"
-        buffer_device = "cuda"
+        buffer_device = "cpu"
     else:
-        init_device = "cuda"
+        init_device = "cpu"
         buffer_device = None
 
     # apply parallelisms and initialization
@@ -271,8 +270,6 @@ def main(job_config: JobConfig):
             input_ids, labels = batch
             data_loading_times.append(time.perf_counter() - data_load_start)
 
-            input_ids = input_ids.cuda()
-            labels = labels.cuda()
             optimizers.zero_grad()
 
             # apply context parallelism if cp is enabled
@@ -355,8 +352,6 @@ def main(job_config: JobConfig):
             ntokens_since_last_log += labels.numel()
             data_loading_times.append(time.perf_counter() - data_load_start)
 
-            input_ids = input_ids.cuda()
-            labels = labels.cuda()
             optimizers.zero_grad()
 
             # apply context parallelism if cp is enabled
