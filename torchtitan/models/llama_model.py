@@ -7,6 +7,9 @@
 # Llama 2 is licensed under the LLAMA 2 Community License,
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
+# Torch titan's implementation of transformer
+
+
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -16,7 +19,62 @@ import torch.nn.functional as F
 from torch import nn
 from torchtitan.models.norms import build_norm
 
+def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
+    """
+    Builds the specified normalization layer based on the norm_type.
 
+    Args:
+        norm_type (str): The type of normalization layer to build.
+            Supported types: layernorm, np_layernorm, rmsnorm, fused_rmsnorm
+        dim (int): The dimension of the normalization layer.
+        eps (float, optional): The epsilon value for numerical stability. Defaults to 1e-6.
+
+    Returns:
+        The built normalization layer.
+
+    Raises:
+        NotImplementedError: If an unknown norm_type is provided.
+    """
+    norm_type = norm_type.lower()  # Normalize to lowercase
+
+    if norm_type == "layernorm":
+        return nn.LayerNorm(dim, eps=eps, bias=False)
+    elif norm_type == "np_layernorm":
+        return nn.LayerNorm(dim, eps=eps, elementwise_affine=False, bias=False)
+    elif norm_type == "rmsnorm":
+        return RMSNorm(dim, eps=eps)
+    else:
+        raise NotImplementedError(f"Unknown norm_type: '{norm_type}'")
+
+class RMSNorm(nn.Module):
+    """
+    Initialize the RMSNorm normalization layer.
+
+    Args:
+        dim (int): The dimension of the input tensor.
+        eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
+
+    Attributes:
+        eps (float): A small value added to the denominator for numerical stability.
+        weight (nn.Parameter): Learnable scaling parameter.
+
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x: torch.Tensor):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x: torch.Tensor):
+        output = self._norm(x.float()).type_as(x)
+        return output * self.weight
+
+    def reset_parameters(self):
+        torch.nn.init.ones_(self.weight)  # type: ignore
+        
 @dataclass
 class ModelArgs:
     dim: int = 4096
@@ -34,7 +92,8 @@ class ModelArgs:
     # `False`, each uses the total number of transformer blocks
     depth_init: bool = True
     norm_type: str = "rmsnorm"
-    embed_type: str = "rotary"
+    enable_embedding: bool = True
+    enable_output: bool = True
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
@@ -127,28 +186,6 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     )
 
 
-class EmbeddingStem(nn.Module):
-    def __init__(self, vocab_size, n_embed, seq_len):
-        super().__init__()
-        self.tok_emb = nn.Embedding(vocab_size, n_embed)
-        self.pos_emb = nn.Parameter(torch.zeros(1, seq_len, n_embed))
-        self.weight = self.tok_emb.weight
-
-    def reset_parameters(self):
-        self.tok_emb.reset_parameters()
-
-    def forward(self, idx):
-        b, t = idx.size()
-
-        token_embeddings = self.tok_emb(
-            idx
-        )  # each index maps to a (learnable) embedding vector
-        position_embeddings = self.pos_emb[
-            :, :t, :
-        ]  # each position maps to a (learnable) position vector
-        return token_embeddings + position_embeddings
-
-
 class Attention(nn.Module):
     """
     Multi-head attention module.
@@ -170,7 +207,6 @@ class Attention(nn.Module):
 
     def __init__(self, model_args: ModelArgs):
         super().__init__()
-        self.apply_rotary_embed = model_args.embed_type == "rotary"
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
             model_args.n_heads
@@ -220,8 +256,7 @@ class Attention(nn.Module):
         xk = xk.view(bs, seqlen, -1, self.head_dim)
         xv = xv.view(bs, seqlen, -1, self.head_dim)
 
-        if self.apply_rotary_embed:
-            xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
         # repeat k/v heads if n_kv_heads < n_heads
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -382,13 +417,7 @@ class Transformer(nn.Module):
         self.vocab_size = model_args.vocab_size
         self.n_layers = model_args.n_layers
 
-        self.tok_embeddings = (
-            nn.Embedding(model_args.vocab_size, model_args.dim)
-            if model_args.embed_type == "rotary"
-            else EmbeddingStem(
-                model_args.vocab_size, model_args.dim, model_args.max_seq_len
-            )
-        )
+        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
 
         # TODO persistent should be set to false, since this buffer can be recomputed.
         # however, we set it to true for 2 reasons.  (1) due to pytorch/pytorch#123411,
@@ -397,8 +426,7 @@ class Transformer(nn.Module):
         # a seed checkpoint rather than calling init_weights, we need freqs_cis to be
         # initialized by the checkpoint, or we need to add a separate initializer for
         # just the non-persistent buffers that is called after loading checkpoints.
-        if model_args.embed_type == "rotary":
-            self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
+        self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
@@ -426,12 +454,9 @@ class Transformer(nn.Module):
         ``init_weights``. We only call it in the constructor of this
         ``Transformer`` root module to avoid reinitializing tensors.
         """
-        if self.model_args.embed_type == "rotary":
-            buffer_device = buffer_device or self.freqs_cis.device
-            with torch.device(buffer_device):
-                self.freqs_cis = self._precompute_freqs_cis()
-        else:
-            self.freqs_cis = None
+        buffer_device = buffer_device or self.freqs_cis.device
+        with torch.device(buffer_device):
+            self.freqs_cis = self._precompute_freqs_cis()
         if self.tok_embeddings is not None:
             nn.init.normal_(self.tok_embeddings.weight)
         for layer in self.layers.values():

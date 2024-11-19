@@ -257,82 +257,83 @@ def main(job_config: JobConfig):
 
     # warmup and grad bucket construction.
     # we probably don't need this but still
-    for _ in range(2):
-        # get batch
-        data_load_start = time.perf_counter()
-        batch = next(data_iterator)
-        input_ids, labels = batch
-        data_loading_times.append(time.perf_counter() - data_load_start)
+    if dp_degree > 1:
+        for _ in range(2):
+            # get batch
+            data_load_start = time.perf_counter()
+            batch = next(data_iterator)
+            input_ids, labels = batch
+            data_loading_times.append(time.perf_counter() - data_load_start)
 
-        input_ids = input_ids.cuda()
-        labels = labels.cuda()
-        optimizers.zero_grad()
+            input_ids = input_ids.cuda()
+            labels = labels.cuda()
+            optimizers.zero_grad()
 
-        # apply context parallelism if cp is enabled
-        optional_context_parallel_ctx = (
-            utils.create_context_parallel_ctx(
-                cp_mesh=world_mesh["cp"],
-                cp_buffers=[input_ids, labels, model.freqs_cis],
-                cp_seq_dims=[1, 1, 0],
-                cp_no_restore_buffers={input_ids, labels},
+            # apply context parallelism if cp is enabled
+            optional_context_parallel_ctx = (
+                utils.create_context_parallel_ctx(
+                    cp_mesh=world_mesh["cp"],
+                    cp_buffers=[input_ids, labels, model.freqs_cis],
+                    cp_seq_dims=[1, 1, 0],
+                    cp_no_restore_buffers={input_ids, labels},
+                )
+                if parallel_dims.cp_enabled
+                else None
             )
-            if parallel_dims.cp_enabled
-            else None
-        )
 
-        if parallel_dims.pp_enabled:
-            # Pipeline Parallel forward / backward inside step() call
-            is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
+            if parallel_dims.pp_enabled:
+                # Pipeline Parallel forward / backward inside step() call
+                is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
 
-            with train_context(optional_context_parallel_ctx):
-                if pp_mesh.get_local_rank() == 0:
-                    pp_schedule.step(input_ids)
-                elif is_last_stage:
-                    losses = []
-                    pp_schedule.step(target=labels, losses=losses)
-                else:
-                    pp_schedule.step()
+                with train_context(optional_context_parallel_ctx):
+                    if pp_mesh.get_local_rank() == 0:
+                        pp_schedule.step(input_ids)
+                    elif is_last_stage:
+                        losses = []
+                        pp_schedule.step(target=labels, losses=losses)
+                    else:
+                        pp_schedule.step()
 
-            # accumulate losses across pipeline microbatches
-            loss = (
-                torch.mean(torch.stack(losses))
-                if is_last_stage
-                else torch.Tensor([-1.0])
-            )
-        else:
-            # Non-PP forward / backward
-            with train_context(optional_context_parallel_ctx):
-                pred = model(input_ids)
-                loss = loss_fn(pred, labels)
-                # pred.shape=(bs, seq_len, vocab_size)
-                # need to free to before bwd to avoid peaking memory
-                del pred
-                loss.backward(retain_graph=True)
+                # accumulate losses across pipeline microbatches
+                loss = (
+                    torch.mean(torch.stack(losses))
+                    if is_last_stage
+                    else torch.Tensor([-1.0])
+                )
+            else:
+                # Non-PP forward / backward
+                with train_context(optional_context_parallel_ctx):
+                    pred = model(input_ids)
+                    loss = loss_fn(pred, labels)
+                    # pred.shape=(bs, seq_len, vocab_size)
+                    # need to free to before bwd to avoid peaking memory
+                    del pred
+                    loss.backward(retain_graph=True)
 
-        # clip gradients
-        for m in model_parts:
-            torch.nn.utils.clip_grad_norm_(
-                m.parameters(), job_config.training.max_norm, foreach=True
-            )
-        # sync float8 amaxes and scales
-        float8_handler.sync_float8_amax_and_scale_history(model_parts)
+            # clip gradients
+            for m in model_parts:
+                torch.nn.utils.clip_grad_norm_(
+                    m.parameters(), job_config.training.max_norm, foreach=True
+                )
+            # sync float8 amaxes and scales
+            float8_handler.sync_float8_amax_and_scale_history(model_parts)
 
-        # calculate float8 dynamic amax/scale for all-parameter for FSDP2
-        # it issues a single all-reduce for all parameters at once for better performance
-        float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
+            # calculate float8 dynamic amax/scale for all-parameter for FSDP2
+            # it issues a single all-reduce for all parameters at once for better performance
+            float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
 
-        optimizers.zero_grad()
+            optimizers.zero_grad()
 
-    ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
-    grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
-    initial_bucket_size = [
-        [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
-        for grad_bucket in grad_buckets
-    ]
+        ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
+        grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
+        initial_bucket_size = [
+            [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
+            for grad_bucket in grad_buckets
+        ]
 
-    print("Warming up GPU done.")
-    print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
-    print(f"Final bucket sizes: {initial_bucket_size}")
+        print("Warming up GPU done.")
+        print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
+        print(f"Final bucket sizes: {initial_bucket_size}")
 
     with maybe_enable_profiling(
         job_config, global_step=train_state.step

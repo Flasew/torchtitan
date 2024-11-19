@@ -173,6 +173,12 @@ class JobConfig:
             default="./torchtitan/datasets/tokenizer/tokenizer.model",
             help="Tokenizer path",
         )
+        self.parser.add_argument(
+            "--model.embedding_type",
+            type=str,
+            default="rotary",
+            help="Model embedding type",
+        )
 
         # optimizer configs
         self.parser.add_argument(
