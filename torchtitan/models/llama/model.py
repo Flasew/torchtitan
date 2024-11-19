@@ -35,6 +35,7 @@ class ModelArgs:
     depth_init: bool = True
     norm_type: str = "rmsnorm"
     embed_type: str = "rotary"
+    activation: str = "SwiGLU"
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
@@ -284,6 +285,38 @@ class FeedForward(nn.Module):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=init_std)
 
 
+class GeLUFeedForward(nn.Module):
+    """
+    FeedForward module with GeLU
+
+    Args:
+        dim (int): Input dimension.
+        hidden_dim (int): Hidden dimension of the feedforward layer.
+        ffn_dim_multiplier (Optional[float]): Custom multiplier for hidden dimension. Defaults to None.
+
+    Attributes:
+        w1 (Linear): Linear transformation for the first layer.
+        w2 (Linear): Linear transformation for the second layer.
+
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+    ):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+
+    def forward(self, x):
+        return self.w2(F.gelu(self.w1(x)))
+
+    def init_weights(self, init_std: float):
+        nn.init.trunc_normal_(self.w1.weight, mean=0.0, std=0.02)
+        nn.init.trunc_normal_(self.w2.weight, mean=0.0, std=init_std)
+
+
 class TransformerBlock(nn.Module):
     """
     TransformerBlock Module
@@ -309,12 +342,17 @@ class TransformerBlock(nn.Module):
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
         self.attention = Attention(model_args)
-        self.feed_forward = FeedForward(
-            dim=model_args.dim,
-            hidden_dim=4 * model_args.dim,
-            multiple_of=model_args.multiple_of,
-            ffn_dim_multiplier=model_args.ffn_dim_multiplier,
+        self.feed_forward = (
+            FeedForward(
+                dim=model_args.dim,
+                hidden_dim=4 * model_args.dim,
+                multiple_of=model_args.multiple_of,
+                ffn_dim_multiplier=model_args.ffn_dim_multiplier,
+            )
+            if model_args.activation == "SwiGLU"
+            else GeLUFeedForward(model_args.dim, 4 * model_args.dim)
         )
+
         self.layer_id = layer_id
         self.num_layers = model_args.n_layers
 
@@ -398,7 +436,9 @@ class Transformer(nn.Module):
         # initialized by the checkpoint, or we need to add a separate initializer for
         # just the non-persistent buffers that is called after loading checkpoints.
         if model_args.embed_type == "rotary":
-            self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
+            self.register_buffer(
+                "freqs_cis", self._precompute_freqs_cis(), persistent=True
+            )
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
