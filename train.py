@@ -316,10 +316,8 @@ def main(job_config: JobConfig):
         for i in range(2):
             print(f"warmup iter: {i}")
             # get batch
-            data_load_start = time.perf_counter()
             batch = next(data_iterator)
             input_ids, labels = batch
-            data_loading_times.append(time.perf_counter() - data_load_start)
 
             input_ids = input_ids.cuda()
             labels = labels.cuda()
@@ -401,6 +399,7 @@ def main(job_config: JobConfig):
             gc_handler.run(train_state.step)
 
             # get batch
+            iter_start = time.perf_counter_ns()
             data_load_start = time.perf_counter()
             batch = next(data_iterator)
             input_ids, labels = batch
@@ -473,7 +472,7 @@ def main(job_config: JobConfig):
 
             losses_since_last_log.append(loss)
             if train_filename:
-                train_iterlog.append(f"{train_state.step},{train_end - data_load_start},{train_end},{loss}\n")
+                train_iterlog.append(f"{train_state.step},{train_end - iter_start},{train_end},{loss}\n")
 
             # log metrics
             if (
