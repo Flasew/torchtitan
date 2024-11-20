@@ -2,7 +2,7 @@
 
 [job]
 dump_folder = "./outputs"
-description = "GPT3 6.7B training"
+description = "GPT2 1.5B training"
 
 [profiling]
 enable_profiling = false
@@ -16,7 +16,7 @@ save_tb_folder = "tb"
 
 [model]
 name = "llama2"
-flavor = "gpt3_6_7B"
+flavor = "gpt2"
 norm_type = "layernorm"  # layernorm / np_layernorm / rmsnorm / fused_rmsnorm
 tokenizer_path = "./torchtitan/datasets/tokenizer/tokenizer.model"
 
@@ -25,11 +25,11 @@ name = "AdamW"
 lr = 3e-4
 
 [training]
-batch_size = 1
-seq_len = 2048
+batch_size = 16
+seq_len = 1024 
 warmup_steps = 200  # lr scheduler warm up, normally 20% of the train steps
 max_norm = 1.0  # grad norm clipping
-steps = 1000
+steps = 100
 data_parallel_replicate_degree = 12
 data_parallel_shard_degree = 1
 tensor_parallel_degree = 1  # dp-only would be sufficient for 7B
@@ -50,7 +50,7 @@ export_dtype = "float32"
 async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
 
 [activation_checkpoint]
-mode = 'none'  # ['none', 'selective', 'full']
+mode = 'disable'  # ['none', 'selective', 'full']
 selective_ac_option = 'op'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
 
 [float8]
