@@ -81,6 +81,12 @@ class JobConfig:
             action="store_true",
             help="Add this config to the integration test suite",
         )
+        self.parser.add_argument(
+            "--job.save_to_file",
+            type=str,
+            default=None,
+            help="Save training time csv log",
+        )
 
         # profiling configs
         self.parser.add_argument(

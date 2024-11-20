@@ -175,7 +175,7 @@ def init_distributed(job_config):
     os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
 
     backend = "nccl"
-    if job_config.training.enable_cpu_offload:
+    if job_config.training.enable_cpu_offload or job_config.job.save_to_file:
         backend = "cuda:nccl,cpu:gloo"
     torch.distributed.init_process_group(
         backend=backend,

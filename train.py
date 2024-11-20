@@ -6,9 +6,11 @@
 
 import os
 import time
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 import torch
+
+import torch.distributed as dist
 
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed._composable.replicate import replicate
@@ -28,6 +30,37 @@ from torchtitan.parallelisms import (
     ParallelDims,
 )
 from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+
+
+def broadcast_file_name(file_name, src=0):
+    """
+    Broadcasts a file name from the source process to all other processes.
+
+    Args:
+        file_name (str): The file name to broadcast (only needed on src process).
+        src (int): The rank of the source process.
+
+    Returns:
+        str: The broadcasted file name.
+    """
+    # Encode the file name to bytes
+    max_length = 256  # Assume the max file name length
+    if dist.get_rank() == src:
+        encoded_file_name = file_name.encode("utf-8")
+        assert len(encoded_file_name) < max_length, "File name too long!"
+        file_name_tensor = torch.zeros(max_length, dtype=torch.uint8)
+        file_name_tensor[: len(encoded_file_name)] = torch.tensor(
+            list(encoded_file_name), dtype=torch.uint8
+        )
+    else:
+        file_name_tensor = torch.zeros(max_length, dtype=torch.uint8)
+
+    # Broadcast the tensor
+    dist.broadcast(file_name_tensor, src=src)
+
+    # Decode the tensor back to a string
+    decoded_file_name = bytes(file_name_tensor.tolist()).decode("utf-8").rstrip("\x00")
+    return decoded_file_name
 
 
 # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
@@ -186,6 +219,28 @@ def main(job_config: JobConfig):
     # build optimizer after applying parallelisms to the model
     optimizers = build_optimizers(model_parts, job_config)
     lr_schedulers = build_lr_schedulers(optimizers.optimizers, job_config)
+
+    if job_config.job.save_to_file:
+        if dist.get_rank() == 0:
+            ts = datetime.now().strftime("%Y%m%d%H%M%S")
+            file_name = (
+                f"{job_config.job.save_to_file}_"
+                + f"{job_config.training.batch_size}_"
+                + f"bf16_"
+                + f"DISABLED_"
+                + f"{ts}_"
+            )
+        else:
+            file_name = ""
+        train_filename = (
+            broadcast_file_name(file_name, src=0) + f"{dist.get_rank()}.csv"
+        )
+        train_iterlog = []
+        train_iterlog.append("iter,iter_time,wct,loss\n") 
+    else: 
+        train_filename = None
+        train_iterlog = None
+        
 
     train_state = TrainState()
 
@@ -413,8 +468,11 @@ def main(job_config: JobConfig):
             # calculate float8 dynamic amax/scale for all-parameter for FSDP2
             # it issues a single all-reduce for all parameters at once for better performance
             float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
+            train_end = time.perf_counter_ns()
 
             losses_since_last_log.append(loss)
+            if train_filename:
+                train_iterlog.append(f"{train_state.step},{train_end - data_load_start},{train_end},{loss}\n")
 
             # log metrics
             if (
@@ -503,6 +561,10 @@ def main(job_config: JobConfig):
                     world_mesh=world_mesh,
                 )
 
+    if train_filename:
+        with open(train_filename, 'w') as f:
+            f.write(''.join(train_iterlog))
+    
     if torch.distributed.get_rank() == 0:
         logger.info("Sleeping 2 seconds for other ranks to complete")
         time.sleep(2)

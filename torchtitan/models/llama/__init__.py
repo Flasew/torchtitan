@@ -15,6 +15,9 @@ llama2_configs = {
     "debugmodel": ModelArgs(dim=256, n_layers=8, n_heads=16, activation="GeLU"),
     "271M": ModelArgs(dim=1024, n_layers=16, n_heads=8),
     "1B": ModelArgs(dim=2048, n_layers=18, n_heads=16),
+    "1B_gpt3xl": ModelArgs(
+        dim=2048, n_layers=24, n_heads=16, embed_type="position", activation="GeLU"
+    ),
     "7B_gpt": ModelArgs(
         dim=4096, n_layers=32, n_heads=32, embed_type="position", activation="GeLU"
     ),
