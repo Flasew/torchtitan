@@ -5,7 +5,7 @@ dump_folder = "./outputs"
 description = "Llama2 7B training"
 
 [profiling]
-enable_profiling = true
+enable_profiling = false
 save_traces_folder = "profile_trace"
 profile_freq = 100
 
@@ -16,7 +16,7 @@ save_tb_folder = "tb"
 
 [model]
 name = "llama2"
-flavor = "7B"
+flavor = "7B_gpt"
 norm_type = "rmsnorm"  # layernorm / np_layernorm / rmsnorm / fused_rmsnorm
 tokenizer_path = "./torchtitan/datasets/tokenizer/tokenizer.model"
 
