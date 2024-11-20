@@ -310,7 +310,6 @@ def main(job_config: JobConfig):
         f"(warmup {job_config.training.warmup_steps})"
     )
 
-    '''
     # warmup and grad bucket construction.
     # we probably don't need this but still
     if dp_degree > 1:
@@ -391,7 +390,6 @@ def main(job_config: JobConfig):
         print("Warming up GPU done.")
         print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
         print(f"Final bucket sizes: {initial_bucket_size}")
-    '''
 
     with maybe_enable_profiling(
         job_config, global_step=train_state.step
