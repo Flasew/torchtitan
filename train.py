@@ -236,11 +236,11 @@ def main(job_config: JobConfig):
             broadcast_file_name(file_name, src=0) + f"{dist.get_rank()}.csv"
         )
         train_iterlog = []
-        train_iterlog.append("iter,iter_time,wct,loss\n") 
-    else: 
+        train_iterlog.append("iter,iter_time,wct,loss\n")
+    else:
         train_filename = None
         train_iterlog = None
-        
+
 
     train_state = TrainState()
 
@@ -310,10 +310,12 @@ def main(job_config: JobConfig):
         f"(warmup {job_config.training.warmup_steps})"
     )
 
+    '''
     # warmup and grad bucket construction.
     # we probably don't need this but still
     if dp_degree > 1:
-        for _ in range(2):
+        for i in range(2):
+            print(f"warmup iter: {i}")
             # get batch
             data_load_start = time.perf_counter()
             batch = next(data_iterator)
@@ -389,6 +391,7 @@ def main(job_config: JobConfig):
         print("Warming up GPU done.")
         print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
         print(f"Final bucket sizes: {initial_bucket_size}")
+    '''
 
     with maybe_enable_profiling(
         job_config, global_step=train_state.step
@@ -564,7 +567,7 @@ def main(job_config: JobConfig):
     if train_filename:
         with open(train_filename, 'w') as f:
             f.write(''.join(train_iterlog))
-    
+
     if torch.distributed.get_rank() == 0:
         logger.info("Sleeping 2 seconds for other ranks to complete")
         time.sleep(2)

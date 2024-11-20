@@ -133,10 +133,6 @@ class EmbeddingStem(nn.Module):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, n_embed)
         self.pos_emb = nn.Parameter(torch.zeros(1, seq_len, n_embed))
-        self.weight = self.tok_emb.weight
-
-    def reset_parameters(self):
-        self.tok_emb.reset_parameters()
 
     def forward(self, idx):
         b, t = idx.size()
@@ -473,7 +469,10 @@ class Transformer(nn.Module):
         else:
             self.freqs_cis = None
         if self.tok_embeddings is not None:
-            nn.init.normal_(self.tok_embeddings.weight)
+            if self.model_args.embed_type == 'rotary':
+                nn.init.normal_(self.tok_embeddings.weight)
+            else:
+                nn.init.normal_(self.tok_embeddings.tok_emb.weight)
         for layer in self.layers.values():
             if layer is not None:
                 layer.init_weights()
