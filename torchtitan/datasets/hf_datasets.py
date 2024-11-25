@@ -24,6 +24,7 @@ from datasets.distributed import split_dataset_by_node
 _supported_datasets = {
     "c4_test": "test/assets/c4_test",
     "c4": "allenai/c4",
+    "c4_local": "/data/dataset/c4/en",
 }
 
 
@@ -93,6 +94,8 @@ class HuggingFaceDataset(IterableDataset, Stateful):
             # c4 is huge, and requires both streaming and language selection
             # (we default to en)
             ds = load_dataset(dataset_path, name="en", split="train", streaming=True)
+        elif dataset_name == "c4_local":
+            ds = load_dataset("json", dataset_path, split="train", streaming=True)
         else:
             ds = load_dataset(dataset_path, split="train")
 
