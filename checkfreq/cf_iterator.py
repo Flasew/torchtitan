@@ -12,14 +12,14 @@ import os
 
 class CFIterator:
 	def __init__(
-			self, 
-			dataloader, 
-			bs=128, 
-			steps_this_epoch=0, 
-			epoch=0, 
+			self,
+			dataloader,
+			bs=128,
+			steps_this_epoch=0,
+			epoch=0,
 			arch='resnet18',
 			worker_id=0,
-			chk_freq=0, 
+			chk_freq=0,
 			steps_to_run=-1,
 			max_overhead=5,
 			dynamic = False,
@@ -61,7 +61,7 @@ class CFIterator:
 
 		if self._cf_manager is not None:
 			self._chk_mode = self._cf_manager.mode
-		
+
 		if self._worker_id == 0:
 			if self._chk_mode == CFMode.MANUAL and self._chk_freq == 0:
 				print("No iter level checkpointing chosen in MANUAL mode")
@@ -110,7 +110,7 @@ class CFIterator:
 			self._skip_few_monitors = True
 			self._monitor_iter_count = 0
 			print("Loaded : iter_dur = {}s, freq={}, fn={}, th={}".format(self._avg_iter_dur,self._chk_freq,self._chk_fn, self._use_thread))
-				
+
 
 	def cache_params(self):
 		data = {
@@ -124,20 +124,20 @@ class CFIterator:
 		with open(self._cache_file, 'w') as f:
 			json.dump(data, f)
 			os.fsync(f.fileno())
-			
+
 	def get_chk_fn_str(self):
 		if self._chk_fn == getattr(self._cf_manager, "save_cpu"):
 			return "cpu"
-		return "gpu"	
+		return "gpu"
 
 	def populate_chk_fn(self, dev):
 		if dev == "cpu":
 			self._chk_fn = getattr(self._cf_manager, "save_cpu")
 		else:
 			self._chk_fn = getattr(self._cf_manager, "save")
-		
 
-		
+
+
 	def __iter__(self):
 		self._iterator = iter(self._dataloader)
 		return self
@@ -149,13 +149,13 @@ class CFIterator:
 				self._profile_iter_count += 1
 				dev = max(0, torch.cuda.current_device())
 				if self._profile_iter_count < 100 and self._profile_iter_count >= 5:
-						print("PROFILE step {}".format(self._profile_iter_count))	
+						print("PROFILE step {}".format(self._profile_iter_count))
 						self._iter_dur.append(time.time()-self._prev_iter_end)
 						# Change to profile
 						self._mem_util.append(torch.cuda.max_memory_allocated(dev))
 				elif self._profile_iter_count == 100:
 						self._complete_profile(dev)
-						
+
 		# Checkpoint if required on main worker
 		elif self._worker_id == 0 and self._chk_freq > 0 and self._steps_since_chk == self._chk_freq:
 		#elif self._worker_id == 0 and self._chk_freq > 0 and self._total_steps % self._chk_freq == 0 and self._steps_since_chk == self._chk_freq:
@@ -165,10 +165,10 @@ class CFIterator:
 				#self._cf_manager.save(synchronous=True, additional_snapshot=self.state_dict(), persist=False)
 			else:
 				# Iter-level chk
-				self._chk_fn(additional_snapshot=self.state_dict(), use_thread=self._use_thread) 
-			
-			self._steps_since_chk = 0    
- 
+				self._chk_fn(additional_snapshot=self.state_dict(), use_thread=self._use_thread)
+
+			self._steps_since_chk = 0
+
 			if self._profile_done and not self._start_monitor and self._chk_mode == CFMode.AUTO and not self._stop_monitor:
 				self._iter_dur = []
 				self._start_monitor = True
@@ -176,7 +176,7 @@ class CFIterator:
 
 		if self._worker_id == 0 and self._start_monitor and not self._stop_monitor:
 			self._monitor_iter_count += 1
-				
+
 			if self._monitor_iter_count == 1:
 				self.t_start = time.time()
 			elif self._monitor_iter_count == self._chk_freq + 1:
@@ -189,7 +189,7 @@ class CFIterator:
 				if self._skip_few_monitors and len(self._iter_dur) > 3:
 					self._iter_dur = self._iter_dur[2:-1]
 					self._skip_few_monitors = False
-	
+
 				current_iter_mean =  mean(self._iter_dur)
 				current_total = sum(self._iter_dur)
 				orig_total =  self._avg_iter_dur*len(self._iter_dur)
@@ -199,7 +199,7 @@ class CFIterator:
 				if num_items > 3:
 					new_avg = mean(self._iter_dur[num_items:])
 					print("New avg = {:.3f}s".format(new_avg))
-				
+
 
 				overhead = max(0, current_iter_mean - self._avg_iter_dur)
 				overhead_full = current_total - orig_total
@@ -228,28 +228,29 @@ class CFIterator:
 			if self._steps_this_run == self._steps_to_run:
 				#print("MUST CHECKPOINT NOW AT ITER {}:{}:{}".format(self._epoch, self._steps_this_epoch, self._samples_this_epoch))
 				self._exit = True
-				print("Epoch={}, this ep steps={}, total_steps={}, steps_this_run = {}".format(self._epoch, self._steps_this_epoch, self._total_steps, self._steps_this_run))	
+				print("Epoch={}, this ep steps={}, total_steps={}, steps_this_run = {}".format(self._epoch, self._steps_this_epoch, self._total_steps, self._steps_this_run))
 				raise StopIteration
 
 
 		self._prev_iter_end  = time.time()
-		
+
 		#Else get next batch from iterator
 		try:
 			val = next(self._dataloader_iter)
 		except StopIteration:
 			print("Tracking epoch end in CF DL. Steps this run = {}, this epoch={}, samples this epoch={}".format(self._steps_this_run, self._steps_this_epoch, self._samples_this_epoch))
 			self._epoch += 1
-			self._steps_this_epoch = 0     
-			self._samples_this_epoch = 0     
-			self._steps_since_chk = 0     
+            self._steps_this_run = 0
+			self._steps_this_epoch = 0
+			self._samples_this_epoch = 0
+			self._steps_since_chk = 0
 			print("Epoch set to {}".format(self._epoch))
-			
+
 			# Reached epoch boundary. Force a chk
 			if self._worker_id == 0 and self._chk_mode == CFMode.MANUAL:
 				self._cf_manager.save(
-					synchronous=True, 
-					additional_snapshot=self.state_dict(), 
+					synchronous=True,
+					additional_snapshot=self.state_dict(),
 					persist=self._persist,
 					is_epoch = True,
 					epoch = self._epoch)
@@ -257,7 +258,8 @@ class CFIterator:
 				self._chk_fn(
 					additional_snapshot=self.state_dict(),
 					is_epoch = True,
-					epoch = self._epoch) 
+					epoch = self._epoch)
+		    self._dataloader_iter = iter(self._dataloader)
 
 			raise StopIteration
 
@@ -269,7 +271,7 @@ class CFIterator:
 
 		return val
 
-		
+
 
 	def _complete_profile(self, dev):
 		self._avg_iter_dur = mean(self._iter_dur)
@@ -305,14 +307,14 @@ class CFIterator:
 		print("t_cp={:.4f}, t_ct={:.4f}".format(t_cp, t_ct))
 
 		# By default, set CPU based snapshot
-		self._chk_fn = getattr(self._cf_manager, "save_cpu") 
-		
+		self._chk_fn = getattr(self._cf_manager, "save_cpu")
+
 		# Although we use threading, due to Python imperfections we might
 		# see as much as t_c overhead in one iter
 		overhead = t_c
 		#overhead = max(0, t_c - t_w)
 
-		# If mem available, and low overhead, 
+		# If mem available, and low overhead,
 		# do synchronous GPU snapshot
 		if self._chk_size < self._avg_free_mem:
 			# Use multi-proc by default
@@ -343,7 +345,7 @@ class CFIterator:
 		print("Chosen function is : {}, overhead={}".format(self._chk_fn, overhead))
 
 		_, t_f = self._chk_fn(profile_full=True, use_thread=self._use_thread)
-		
+
 		self._chk_freq = max(math.ceil((t_f - overhead)/t_i), 1)
 
 		percent_overhead = overhead/self._chk_freq*t_i*100
@@ -359,14 +361,14 @@ class CFIterator:
 	def state_dict(self):
 		state = {
 			'iter' : self._steps_this_epoch,
-			'steps_so_far' : self._total_steps, 
+			'steps_so_far' : self._total_steps,
 			'start_index' : self._samples_this_epoch,
 			'epoch' : self._epoch}
 		return state
 
 	def load_state_dict(self, chk_map):
 		if chk_map is None:
-			return 
+			return
 
 		self._steps_this_epoch = chk_map['iter']
 		self._total_steps = chk_map['steps_so_far']
@@ -383,21 +385,21 @@ class CFIterator:
 		dur_snap_2, full_th_gpu_time = self._cf_manager.save(profile=True, use_thread=True)
 		print("Snap th={:.2f}\nSnap proc={:.2f}\nFull Th={:.2f}\nFull proc={:.2f}\nFull GPU proc={:.2f}\nFull GPU th={:.2f}\nGPU snap 1= {:.2f}\nGPU snap 2={:.2f}".format(snap_thread_time,snap_proc_time,full_thread_time,full_proc_time, full_proc_gpu_time, full_th_gpu_time, dur_snap_1, dur_snap_2))
 
-		
+
 
 	def reset(self):
 		return self._dataloader.reset()
 
-	@property 
+	@property
 	def sampler(self):
 		return self._dataloader.sampler
-  
+
 	@property
 	def exit(self):
-		return self._exit	
+		return self._exit
 
 	@property
 	def _size(self):
 		return len(self._dataloader.dataset._all_tokens)
-		
+
 
