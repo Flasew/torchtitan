@@ -21,7 +21,7 @@ llama2_configs = {
     "gpt2": ModelArgs(
         dim=1600, n_layers=48, n_heads=25, embed_type="position", activation="GeLU"
     ),
-    "gpt3_6_7b": ModelArgs(
+    "gpt3_6_7B": ModelArgs(
         dim=4096, n_layers=32, n_heads=32, embed_type="position", activation="GeLU"
     ),
     "7B": ModelArgs(dim=4096, n_layers=32, n_heads=32),

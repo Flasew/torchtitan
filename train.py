@@ -575,7 +575,7 @@ def main(job_config: JobConfig):
 
             # reduce timeout after first train step for faster signal
             # (assuming lazy init and compilation are finished)
-            if train_state.step == 1:
+            if train_state.step == 999999:
                 utils.set_pg_timeouts(
                     timeout=timedelta(seconds=job_config.comm.train_timeout_seconds),
                     world_mesh=world_mesh,
