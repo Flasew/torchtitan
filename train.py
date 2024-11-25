@@ -31,6 +31,10 @@ from torchtitan.parallelisms import (
 )
 from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
 
+from checkfreq.cf_checkpoint import CFCheckpoint
+from checkfreq.cf_manager import CFManager, CFMode
+from checkfreq.cf_iterator import CFIterator
+
 
 def broadcast_file_name(file_name, src=0):
     """
@@ -209,6 +213,7 @@ def main(job_config: JobConfig):
 
         model_parts = [model]
 
+    assert len(model_parts) == 1, "only support one model parts for now"
     gpu_mem_stats = gpu_memory_monitor.get_peak_stats()
     logger.info(
         f"GPU memory usage for model: "
@@ -245,14 +250,25 @@ def main(job_config: JobConfig):
     train_state = TrainState()
 
     # load initial checkpoint
-    checkpoint = CheckpointManager(
-        dataloader=data_loader,
-        model_parts=model_parts,
-        optimizers=optimizers.optimizers,
-        lr_schedulers=lr_schedulers.schedulers,
-        states={"train_state": train_state},
-        job_config=job_config,
-    )
+    if job_config.checkpoint.checkfreq:
+        checkpoint = CFCheckpoint(model=model_parts[0], optimizer=optimizers.optimizers[0])
+        cf_manager = CFManager(job_config.checkpoint.folder, checkpoint, stepper=optimizers)
+        data_loader = CFIterator(
+            data_loader,
+            bs=job_config.training.batch_size * dp_degree,
+            arch=f"{model_name}_{dp_degree}_{world_size}",
+            worker_id=dp_rank,
+            cf_manager=cf_manager,
+        )
+    else:
+        checkpoint = CheckpointManager(
+            dataloader=data_loader,
+            model_parts=model_parts,
+            optimizers=optimizers.optimizers,
+            lr_schedulers=lr_schedulers.schedulers,
+            states={"train_state": train_state},
+            job_config=job_config,
+        )
 
     if job_config.checkpoint.create_seed_checkpoint:
         assert (
@@ -462,7 +478,11 @@ def main(job_config: JobConfig):
 
             # optimizer step
             checkpoint.maybe_wait_for_staging()
-            optimizers.step()
+            if dp_rank == 0 and job_config.checkpoint.checkfreq:
+                cf_manager.weight_update()
+            else:
+                optimizers.step()
+            
             lr_schedulers.step()
 
             # calculate float8 dynamic amax/scale for all-parameter for FSDP2

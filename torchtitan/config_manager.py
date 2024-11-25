@@ -420,7 +420,7 @@ class JobConfig:
         self.parser.add_argument(
             "--checkpoint.export_dtype",
             type=str,
-            default="float32",
+            default="bfloat16",
             choices=["float16", "bfloat16", "float32"],
             help="""
                 Converts to the specified precision when training completes and model_weights_only=true.
@@ -456,6 +456,13 @@ class JobConfig:
                    appropriate hardware support such as ample CPU memory and fast PCIe.
 
                 "disabled" is the default mode.
+            """,
+        )
+        self.parser.add_argument(
+            "--checkpoint.checkfreq",
+            action="store_true",
+            help="""
+                Use CheckFreq to checkpoint the model instead of torch.distributed.checkpoint
             """,
         )
         self.parser.add_argument(
