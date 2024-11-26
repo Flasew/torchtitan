@@ -149,7 +149,7 @@ def main(job_config: JobConfig):
     logger.info(f"Building {model_name} {job_config.model.flavor} with {model_config}")
     with torch.device("meta"):
         model = model_cls.from_model_args(model_config)
-        model = model.to(dtype=torch.bfloat16)
+        model = model.to(dtype=torch.float32)
 
     # a no-op hander if float8 is not enabled
     float8_handler = Float8Handler(job_config, parallel_dims)
@@ -328,7 +328,7 @@ def main(job_config: JobConfig):
 
     # warmup and grad bucket construction.
     # we probably don't need this but still
-    if dp_degree > 1:
+    if job_config.training.data_parallel_replicate_degree > 1:
         for i in range(2):
             print(f"warmup iter: {i}")
             # get batch
@@ -482,7 +482,7 @@ def main(job_config: JobConfig):
                 cf_manager.weight_update()
             else:
                 optimizers.step()
-            
+
             lr_schedulers.step()
 
             # calculate float8 dynamic amax/scale for all-parameter for FSDP2
