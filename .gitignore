@@ -1,3 +1,4 @@
+snapshot/
 checkpoint/
 *.csv
 __pycache__

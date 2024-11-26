@@ -6,6 +6,7 @@ import copy
 from collections import OrderedDict
 from collections.abc import Mapping
 import time
+import gc
 
 """
 Checkpointing and restoring logic
@@ -75,7 +76,7 @@ class CFCheckpoint:
 
     def load(self, *args, **kwargs):
         return None
-    
+
     def reset(self, *args, **kwargs):
         return None
 
@@ -121,6 +122,11 @@ class CFCheckpoint:
             self.logger.info("Snapshot is not None. Checkpoint underway")
             return False
 
+        if self.latest_snapshot:
+            del self.latest_snapshot
+            torch.cuda.empty_cache()
+            gc.collect()
+            
         self.latest_snapshot = OrderedDict()
 
         # Snapshot the state of tractable items

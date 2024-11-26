@@ -92,7 +92,7 @@ class CFManager:
         mode=CFMode.AUTO,
         chk_prefix="model_v_",
         stepper=None,
-        stepper_args=None
+        stepper_args=None,
     ):
 
         self.mp_context = mp.get_context("spawn")

@@ -256,7 +256,7 @@ def main(job_config: JobConfig):
         data_loader = CFIterator(
             data_loader,
             bs=job_config.training.batch_size * dp_degree,
-            arch=f"{model_name}_{dp_degree}_{world_size}",
+            arch=f"{model_name}_{job_config.model.flavor}_{dp_degree}_{world_size}",
             worker_id=dp_rank,
             cf_manager=cf_manager,
         )
@@ -278,7 +278,7 @@ def main(job_config: JobConfig):
         logger.info("Created seed checkpoint")
         return
 
-    checkpoint_loaded = checkpoint.load()
+    checkpoint_loaded = False # checkpoint.load()
 
     if parallel_dims.pp_enabled and not checkpoint_loaded:
         # TODO: fix this by allowing each rank to set their own seed
@@ -554,7 +554,8 @@ def main(job_config: JobConfig):
                     f"{color.yellow}memory: {gpu_mem_stats.max_reserved_gib:5.2f}GiB"
                     f"({gpu_mem_stats.max_reserved_pct:.2f}%)  "
                     f"{color.blue}wps: {round(wps):,}  "
-                    f"{color.magenta}mfu: {mfu:.2f}%{color.reset}"
+                    f"{color.magenta}mfu: {mfu:.2f}% "
+                    f"{color.magenta}time: {time_end_to_end:.2f} {color.reset} "
                 )
 
                 losses_since_last_log.clear()
