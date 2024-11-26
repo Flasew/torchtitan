@@ -225,6 +225,21 @@ def main(job_config: JobConfig):
     optimizers = build_optimizers(model_parts, job_config)
     lr_schedulers = build_lr_schedulers(optimizers.optimizers, job_config)
 
+    ckpt_str = (
+        "CHECKFREQ"
+        if job_config.checkpoint.checkfreq
+        else (
+            "DISABLED"
+            if not job_config.checkpoint.enable_checkpoint
+            else (
+                "ASYNCP"
+                if job_config.checkpoint.async_mode == "async_with_pinned_mem"
+                else (
+                    "ASYNC" if job_config.checkpoint.async_mode == "async" else "SYNC"
+                )
+            )
+        )
+    )
     if job_config.job.save_to_file:
         if dist.get_rank() == 0:
             ts = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -232,7 +247,7 @@ def main(job_config: JobConfig):
                 f"{job_config.job.save_to_file}_"
                 + f"{job_config.training.batch_size}_"
                 + f"bf16_"
-                + f"DISABLED_"
+                + f"{ckpt_str}_"
                 + f"{ts}_"
             )
         else:
@@ -241,18 +256,22 @@ def main(job_config: JobConfig):
             broadcast_file_name(file_name, src=0) + f"{dist.get_rank()}.csv"
         )
         train_iterlog = []
-        train_iterlog.append("iter,iter_time,wct,loss\n")
+        train_iterlog.append("iter,iter_time,wct,loss,nsnapshots\n")
     else:
         train_filename = None
         train_iterlog = None
 
-
     train_state = TrainState()
+    nsnapshots = 0
 
     # load initial checkpoint
     if job_config.checkpoint.checkfreq:
-        checkpoint = CFCheckpoint(model=model_parts[0], optimizer=optimizers.optimizers[0])
-        cf_manager = CFManager(job_config.checkpoint.folder, checkpoint, stepper=optimizers)
+        checkpoint = CFCheckpoint(
+            model=model_parts[0], optimizer=optimizers.optimizers[0]
+        )
+        cf_manager = CFManager(
+            job_config.checkpoint.folder, checkpoint, stepper=optimizers
+        )
         data_loader = CFIterator(
             data_loader,
             bs=job_config.training.batch_size * dp_degree,
@@ -278,7 +297,7 @@ def main(job_config: JobConfig):
         logger.info("Created seed checkpoint")
         return
 
-    checkpoint_loaded = False # checkpoint.load()
+    checkpoint_loaded = False  # checkpoint.load()
 
     if parallel_dims.pp_enabled and not checkpoint_loaded:
         # TODO: fix this by allowing each rank to set their own seed
@@ -492,7 +511,10 @@ def main(job_config: JobConfig):
 
             losses_since_last_log.append(loss)
             if train_filename:
-                train_iterlog.append(f"{train_state.step},{train_end - iter_start},{train_end},{loss}\n")
+                train_iterlog.append(
+                    f"{train_state.step},{train_end - iter_start},{train_end},{loss},"
+                    + f"{checkpoint.nsnapshots if not job_config.checkpoint.checkfreq else cf_manager.chk_global_id - 1}\n"
+                )
 
             # log metrics
             if (
@@ -583,8 +605,8 @@ def main(job_config: JobConfig):
                 )
 
     if train_filename:
-        with open(train_filename, 'w') as f:
-            f.write(''.join(train_iterlog))
+        with open(train_filename, "w") as f:
+            f.write("".join(train_iterlog))
 
     if torch.distributed.get_rank() == 0:
         logger.info("Sleeping 2 seconds for other ranks to complete")

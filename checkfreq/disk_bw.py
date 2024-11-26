@@ -10,7 +10,7 @@ def get_storage_bandwidth(disk="/data"):
     if str_bw is not None:
         return str_bw
     else:
-        dev_cmd = ["grep", disk, "/proc/mounts"]
+        dev_cmd = ["grep", "/data", "/proc/mounts"]
         dev_cmd_cut = ["cut", "-d", " ", "-f", "1"]
         p = subprocess.Popen(dev_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         output = subprocess.check_output(dev_cmd_cut, stdin=p.stdout)
@@ -22,8 +22,8 @@ def get_storage_bandwidth(disk="/data"):
             return 0, 0
         device = output.decode("utf-8").rstrip()
         print("Measuring bandwidth of storage dev  {}".format(device))
-        dev_bw = ["hdparm", "-t", device]
-        # dev_bw = ['sudo', 'hdparm', '-t', device]
+        # dev_bw = ["hdparm", "-t", device]
+        dev_bw = ['sudo', 'hdparm', '-t', device]
         p = subprocess.Popen(dev_bw, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = p.communicate()
         result = out.decode("utf-8")
