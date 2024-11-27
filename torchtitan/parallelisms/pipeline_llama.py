@@ -45,7 +45,7 @@ def pipeline_llama(
 
     pp_schedule = build_pipeline_schedule(job_config, stages, loss_fn)
 
-    return pp_schedule, models
+    return pp_schedule, models, stages
 
 
 def pipeline_llama_manual_split(

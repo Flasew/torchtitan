@@ -194,7 +194,7 @@ def main(job_config: JobConfig):
     # apply parallelisms and initialization
     if parallel_dims.pp_enabled:
         # apply PT-D Pipeline Parallel
-        pp_schedule, model_parts = models_pipelining_fns[model_name](
+        pp_schedule, model_parts, pp_stages = models_pipelining_fns[model_name](
             model, pp_mesh, parallel_dims, job_config, device, model_config, loss_fn, dp_mesh
         )
 
@@ -410,10 +410,10 @@ def main(job_config: JobConfig):
                     loss.backward(retain_graph=True)
 
             # clip gradients
-            for m in model_parts:
-                torch.nn.utils.clip_grad_norm_(
-                    m.parameters(), job_config.training.max_norm, foreach=True
-                )
+            # for m in model_parts:
+            #     torch.nn.utils.clip_grad_norm_(
+            #         m.parameters(), job_config.training.max_norm, foreach=True
+            #     )
             # sync float8 amaxes and scales
             float8_handler.sync_float8_amax_and_scale_history(model_parts)
 
@@ -425,7 +425,7 @@ def main(job_config: JobConfig):
 
         # ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
         # print(ddp_refs[0])
-        ddp_refs = model_parts if not pp_mesh else [replicate.state(m)._ddp_weakref() for m in model_parts]
+        ddp_refs = [stage.submod for stage in pp_stages] if pp_mesh else [replicate.state(m)._ddp_weakref() for m in model_parts]
         grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
         initial_bucket_size = [
             [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
