@@ -31,6 +31,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 
+from torch.nn.parallel import DistributedDataParallel
 from torchtitan.config_manager import JobConfig, TORCH_DTYPE_MAP
 from torchtitan.logging import logger
 from torchtitan.parallelisms.parallel_dims import ParallelDims
@@ -312,6 +313,8 @@ def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
 
 def apply_ac(model: nn.Module, ac_config):
     """Apply activation checkpointing to the model."""
+    if isinstance(model, DistributedDataParallel):
+        model = model.module
     for layer_id, transformer_block in model.layers.named_children():
         transformer_block = _apply_ac_to_transformer_block(transformer_block, ac_config)
         model.layers.register_module(layer_id, transformer_block)
@@ -324,6 +327,8 @@ def apply_compile(model: nn.Module):
     Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
+    if isinstance(model, DistributedDataParallel):
+        model = model.module
     for layer_id, transformer_block in model.layers.named_children():
         transformer_block = torch.compile(transformer_block, fullgraph=True)
         model.layers.register_module(layer_id, transformer_block)
