@@ -75,7 +75,7 @@ def generate_fake_input(module, seq_len, dim, vocab_size):
         )
     else:
         dummy_input = torch.randint(
-            0, vocab_size, seq_len, device="cuda"
+            0, vocab_size, (1, seq_len), device="cuda"
         )
     return dummy_input
 
@@ -370,48 +370,40 @@ def main(job_config: JobConfig):
     # warmup and grad bucket construction.
     # we probably don't need this but still
     if job_config.training.data_parallel_replicate_degree > 1:
-        for i in range(1):
-            print(f"warmup iter: {i}")
-            # get batch
-            # batch = next(data_iterator)
-            # input_ids, labels = batch
+        print(f"warmup iterations")
+        sample_input = generate_fake_input(model_parts[0], job_config.training.seq_len, model_config.dim, model_config.vocab_size)
 
-            # input_ids = input_ids.cuda()
-            # labels = labels.cuda()
-            # optimizers.zero_grad()
-            sample_input = generate_fake_input(model_parts[0], job_config.training.seq_len, model_config.dim, model_config.vocab_size)
+        if parallel_dims.pp_enabled:
+            pred = pp_stages[0].submod(sample_input)
+            loss = torch.nn.functional.cross_entropy(pred.flatten(), pred.flatten())
+            loss.backward(retain_graph=True)
+            del pred
+            pp_stages[0].submod(sample_input)
 
-            if parallel_dims.pp_enabled:
-                pred = pp_stages[0].submod(sample_input)
-                loss = torch.nn.functional.cross_entropy(pred.flatten(), pred.flatten())
-                loss.backward(retain_graph=True)
-                del pred
-                pp_stages[0].submod(sample_input)
+        else:
+            # Non-PP forward / backward
+            pred = model(sample_input)
+            loss = loss_fn(pred, pred)
+            loss.backward(etain_graph=True)
+            # pred.shape=(bs, seq_len, vocab_size)
+            # need to free to before bwd to avoid peaking memory
+            del pred
+            model(sample_input)
 
-            else:
-                # Non-PP forward / backward
-                pred = model(sample_input)
-                loss = loss_fn(pred, pred)
-                loss.backward(etain_graph=True)
-                # pred.shape=(bs, seq_len, vocab_size)
-                # need to free to before bwd to avoid peaking memory
-                del pred
-                model(sample_input)
+        optimizers.zero_grad()
 
-            optimizers.zero_grad()
+    # ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
+    # print(ddp_refs[0])
+    ddp_refs = [stage.submod for stage in pp_stages] if pp_mesh else [replicate.state(m)._ddp_weakref() for m in model_parts]
+    grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
+    initial_bucket_size = [
+        [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
+        for grad_bucket in grad_buckets
+    ]
 
-        # ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
-        # print(ddp_refs[0])
-        ddp_refs = [stage.submod for stage in pp_stages] if pp_mesh else [replicate.state(m)._ddp_weakref() for m in model_parts]
-        grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
-        initial_bucket_size = [
-            [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
-            for grad_bucket in grad_buckets
-        ]
-
-        print("Warming up GPU done.")
-        print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
-        print(f"Final bucket sizes: {initial_bucket_size}")
+    print("Warming up GPU done.")
+    print(f"Element sizes: {grad_buckets[0][0].buffer().element_size()}")
+    print(f"Final bucket sizes: {initial_bucket_size}")
 
     with maybe_enable_profiling(
         job_config, global_step=train_state.step
