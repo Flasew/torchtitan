@@ -126,6 +126,7 @@ def parallelize_llama(
     elif parallel_dims.dp_replicate_enabled:
         if world_mesh.ndim > 1:
             print("oof")
+            return
         dp_mesh_dim_names = (
                 ("dp",)
         )

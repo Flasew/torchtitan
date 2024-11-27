@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
 from torch.distributed.pipelining import PipelineStage
+from torch.nn.parallel import DistributedDataParallel
 
 from torchtitan.config_manager import JobConfig
 from torchtitan.logging import logger
@@ -36,9 +37,10 @@ def pipeline_llama(
     device: DeviceType,
     model_config: ModelArgs,
     loss_fn: Callable[..., torch.Tensor],
+    dp_mesh = None,
 ):
     stages, models = pipeline_llama_manual_split(
-        model, pp_mesh, parallel_dims, job_config, device, model_config
+        model, pp_mesh, parallel_dims, job_config, device, model_config, dp_mesh
     )
 
     pp_schedule = build_pipeline_schedule(job_config, stages, loss_fn)
@@ -53,6 +55,7 @@ def pipeline_llama_manual_split(
     job_config: JobConfig,
     device: DeviceType,
     model_config: ModelArgs,
+    dp_mesh: DeviceMesh
 ):
     """
     This API extracts one torch.nn.Module objects for the part of the model configured to run inside this stage.
@@ -90,6 +93,9 @@ def pipeline_llama_manual_split(
         if not is_last:
             model.norm = None
             model.output = None
+        
+        if dp_mesh:
+            model = DistributedDataParallel(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
         stage = PipelineStage(
             model,
