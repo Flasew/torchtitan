@@ -67,6 +67,18 @@ def broadcast_file_name(file_name, src=0):
     return decoded_file_name
 
 
+def generate_fake_input(module, seq_len, dim, vocab_size):
+    first_layer = next(module.children())
+    if isinstance(first_layer, torch.nn.modules.container.ModuleDict):
+        dummy_input = torch.rand(
+            (1, seq_len, dim), dtype=torch.bfloat16, device="cuda"
+        )
+    else:
+        dummy_input = torch.randint(
+            0, vocab_size, seq_len, device="cuda"
+        )
+    return dummy_input
+
 # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
 @record
 def main(job_config: JobConfig):
@@ -358,68 +370,33 @@ def main(job_config: JobConfig):
     # warmup and grad bucket construction.
     # we probably don't need this but still
     if job_config.training.data_parallel_replicate_degree > 1:
-        for i in range(2):
+        for i in range(1):
             print(f"warmup iter: {i}")
             # get batch
-            batch = next(data_iterator)
-            input_ids, labels = batch
+            # batch = next(data_iterator)
+            # input_ids, labels = batch
 
-            input_ids = input_ids.cuda()
-            labels = labels.cuda()
-            optimizers.zero_grad()
-
-            # apply context parallelism if cp is enabled
-            optional_context_parallel_ctx = (
-                utils.create_context_parallel_ctx(
-                    cp_mesh=world_mesh["cp"],
-                    cp_buffers=[input_ids, labels, model.freqs_cis],
-                    cp_seq_dims=[1, 1, 0],
-                    cp_no_restore_buffers={input_ids, labels},
-                )
-                if parallel_dims.cp_enabled
-                else None
-            )
+            # input_ids = input_ids.cuda()
+            # labels = labels.cuda()
+            # optimizers.zero_grad()
+            sample_input = generate_fake_input(model_parts[0], job_config.training.seq_len, model_config.dim, model_config.vocab_size)
 
             if parallel_dims.pp_enabled:
-                # Pipeline Parallel forward / backward inside step() call
-                is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
+                pred = pp_stages[0].submod(sample_input)
+                loss = torch.nn.functional.cross_entropy(pred.flatten(), pred.flatten())
+                loss.backward(retain_graph=True)
+                del pred
+                pp_stages[0].submod(sample_input)
 
-                with train_context(optional_context_parallel_ctx):
-                    if pp_mesh.get_local_rank() == 0:
-                        pp_schedule.step(input_ids)
-                    elif is_last_stage:
-                        losses = []
-                        pp_schedule.step(target=labels, losses=losses)
-                    else:
-                        pp_schedule.step()
-
-                # accumulate losses across pipeline microbatches
-                loss = (
-                    torch.mean(torch.stack(losses))
-                    if is_last_stage
-                    else torch.Tensor([-1.0])
-                )
             else:
                 # Non-PP forward / backward
-                with train_context(optional_context_parallel_ctx):
-                    pred = model(input_ids)
-                    loss = loss_fn(pred, labels)
-                    # pred.shape=(bs, seq_len, vocab_size)
-                    # need to free to before bwd to avoid peaking memory
-                    del pred
-                    loss.backward(retain_graph=True)
-
-            # clip gradients
-            # for m in model_parts:
-            #     torch.nn.utils.clip_grad_norm_(
-            #         m.parameters(), job_config.training.max_norm, foreach=True
-            #     )
-            # sync float8 amaxes and scales
-            float8_handler.sync_float8_amax_and_scale_history(model_parts)
-
-            # calculate float8 dynamic amax/scale for all-parameter for FSDP2
-            # it issues a single all-reduce for all parameters at once for better performance
-            float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
+                pred = model(sample_input)
+                loss = loss_fn(pred, pred)
+                loss.backward(etain_graph=True)
+                # pred.shape=(bs, seq_len, vocab_size)
+                # need to free to before bwd to avoid peaking memory
+                del pred
+                model(sample_input)
 
             optimizers.zero_grad()
 
