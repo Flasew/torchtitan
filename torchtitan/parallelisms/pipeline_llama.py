@@ -93,8 +93,9 @@ def pipeline_llama_manual_split(
         if not is_last:
             model.norm = None
             model.output = None
-        
+
         if dp_mesh:
+            model.to_empty(device='cuda')
             model = DistributedDataParallel(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
         stage = PipelineStage(

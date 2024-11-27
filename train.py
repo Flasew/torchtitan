@@ -204,7 +204,7 @@ def main(job_config: JobConfig):
         for m in model_parts:
             # apply SPMD-style PT-D techniques
             models_parallelize_fns[model_name](m, world_mesh, parallel_dims, job_config)
-            m.to_empty(device=init_device)
+            # m.to_empty(device=init_device)
             m.init_weights(buffer_device=buffer_device)
             m.train()
     else:
