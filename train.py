@@ -114,9 +114,12 @@ def main(job_config: JobConfig):
         dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
     else:
         dp_degree, dp_rank = 1, 0
+        dp_mesh = None
 
     if parallel_dims.pp_enabled:
         pp_mesh = world_mesh["pp"]
+    else:
+        pp_mesh = None
 
     model_name = job_config.model.name
 
@@ -192,7 +195,7 @@ def main(job_config: JobConfig):
     if parallel_dims.pp_enabled:
         # apply PT-D Pipeline Parallel
         pp_schedule, model_parts = models_pipelining_fns[model_name](
-            model, pp_mesh, parallel_dims, job_config, device, model_config, loss_fn
+            model, pp_mesh, parallel_dims, job_config, device, model_config, loss_fn, dp_mesh
         )
 
         # For PP with looped schedules, each item in model_parts is one stage-model-chunk.
@@ -420,8 +423,9 @@ def main(job_config: JobConfig):
 
             optimizers.zero_grad()
 
-        ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
-        print(ddp_refs[0])
+        # ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
+        # print(ddp_refs[0])
+        ddp_refs = model_parts if not pp_mesh else [replicate.state(m)._ddp_weakref() for m in model_parts]
         grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
         initial_bucket_size = [
             [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
