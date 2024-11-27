@@ -421,6 +421,7 @@ def main(job_config: JobConfig):
             optimizers.zero_grad()
 
         ddp_refs = [replicate.state(m)._ddp_weakref() for m in model_parts]
+        print(ddp_refs[0])
         grad_buckets = [ddp_ref.reducer._get_grad_buckets() for ddp_ref in ddp_refs]
         initial_bucket_size = [
             [b.buffer().nelement() * b.buffer().element_size() for b in grad_bucket]
