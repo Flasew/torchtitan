@@ -384,7 +384,7 @@ def main(job_config: JobConfig):
             # Non-PP forward / backward
             pred = model(sample_input)
             loss = loss_fn(pred, pred)
-            loss.backward(etain_graph=True)
+            loss.backward(retain_graph=True)
             # pred.shape=(bs, seq_len, vocab_size)
             # need to free to before bwd to avoid peaking memory
             del pred
