@@ -225,6 +225,11 @@ def main(job_config: JobConfig):
     optimizers = build_optimizers(model_parts, job_config)
     lr_schedulers = build_lr_schedulers(optimizers.optimizers, job_config)
 
+    ckpt_freq_manual = (
+        f"{job_config.checkpoint.interval}" + "I"
+        if job_config.checkpoint.interval_type == "steps"
+        else "S"
+    )
     ckpt_str = (
         "CHECKFREQ"
         if job_config.checkpoint.checkfreq
@@ -232,10 +237,12 @@ def main(job_config: JobConfig):
             "DISABLED"
             if not job_config.checkpoint.enable_checkpoint
             else (
-                "ASYNCP"
+                f"ASYNCP{ckpt_freq_manual}"
                 if job_config.checkpoint.async_mode == "async_with_pinned_mem"
                 else (
-                    "ASYNC" if job_config.checkpoint.async_mode == "async" else "SYNC"
+                    f"ASYNC{ckpt_freq_manual}"
+                    if job_config.checkpoint.async_mode == "async"
+                    else f"SYNC{ckpt_freq_manual}"
                 )
             )
         )
