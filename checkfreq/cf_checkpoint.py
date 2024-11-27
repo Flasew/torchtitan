@@ -20,24 +20,24 @@ For AUTO mode, dl state must be checkpointable - use CheckFreq iterator
 
 `tracking_map` has the list of tractable objects provided by the user
 to be checkpointed.
-Each tractable item must expose a state_dict() method that returns 
+Each tractable item must expose a state_dict() method that returns
 a map of items to be checkpointed.
 Common examples of such tractable objects are model and optimizer.
 
 `num_tracking` excludes any additional state info that is
-snapshotted outside of CF checkpointer. the DataLoader state 
+snapshotted outside of CF checkpointer. the DataLoader state
 is an example of such attribute.
 
 CF checkpointer only tracks objects which will be snapshotted
 as a part of the manager.
 
-`latest_snapshot` if not None implies that there is an ongoing 
+`latest_snapshot` if not None implies that there is an ongoing
 checkpointing operation. This holds the in-memory (GPU/CPU-memory)
 copy of the state_dicts of the user-tractable objects.
 If theese objects hold CUDA tensors, then the snapshot holds
 a copy of the tensor on the same device as the original.
 If the object is fully CPU resident, so is the snapshot.
-This is set to None when the snapshot has been successfully 
+This is set to None when the snapshot has been successfully
 persisted.
 
 `latest_snapshot` is a map of copy (deepcopy) of state_dict of items in the `tracking_map` and any additional state managed by the
@@ -99,7 +99,7 @@ class CFCheckpoint:
   and any additional state, collectively as a map in `latest_snapshot`
 
   `additional state` is a map of items to be checkpointed
-  Note that all objects in ``additional state` is assumed to be 
+  Note that all objects in ``additional state` is assumed to be
   a copy already - we do not snapshot it, rather only keep track
   of it to persist later.
   It is expected to be a map :
@@ -107,7 +107,7 @@ class CFCheckpoint:
   additional_state = {
     'dl_state' : copy_of_dl_state,
     'chk_global_id' : 1,
-    'donot_delete' : False			
+    'donot_delete' : False
   }
 
   This in-memory snapshotting is done synchronously
@@ -126,7 +126,7 @@ class CFCheckpoint:
             del self.latest_snapshot
             torch.cuda.empty_cache()
             gc.collect()
-            
+
         self.latest_snapshot = OrderedDict()
 
         # Snapshot the state of tractable items
@@ -277,6 +277,7 @@ class CFCheckpoint:
 
         torch.save(snapshot, filepath)
 
+
         with lock:
             active_snapshot.value = 0
 
@@ -284,6 +285,10 @@ class CFCheckpoint:
         f = open(filepath, "a+")
         os.fsync(f.fileno())
         f.close()
+
+        del snapshot
+        torch.cuda.empty_cache()
+        gc.collect()
 
         update_stats(
             filepath,

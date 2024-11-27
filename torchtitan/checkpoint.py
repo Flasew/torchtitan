@@ -173,6 +173,7 @@ class CheckpointManager:
         ckpt_config = job_config.checkpoint
         self.enable_checkpoint = ckpt_config.enable_checkpoint
         self.keep_latest_k = ckpt_config.keep_latest_k
+        self.nsnapshots = 0
 
         if not self.enable_checkpoint:
             return
@@ -399,6 +400,7 @@ class CheckpointManager:
         if not self._should_save(curr_step, force):
             return
 
+        self.nsnapshot += 1
         begin = time.monotonic()
         checkpoint_id = self._create_checkpoint_id(curr_step)
         self._async_wait()

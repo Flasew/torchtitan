@@ -85,6 +85,8 @@ class CFIterator:
         # If AUTO mode, fetch values from cache if present
         if self._worker_id == 0:
             if self._chk_mode == CFMode.AUTO:
+                print(os.getcwd())
+                print(self._cache_file)
                 if os.path.exists(self._cache_file):
                     self.load_params_from_cache()
 
