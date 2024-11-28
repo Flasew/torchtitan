@@ -1,6 +1,7 @@
 #!/bin/bash
 
-jobs=( llama2-7be llama2-13be llama3-8be )
+source ~/.bashrc
+jobs=( llama2-7be )
 #jobs=( llama2-7b llama2-13b llama3-8b )
 
 eval "$(conda shell.bash hook)"
