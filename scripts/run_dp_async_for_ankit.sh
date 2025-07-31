@@ -1,7 +1,8 @@
 #!/bin/bash
 
-jobs=( llama2-7b llama3-8b llama2-13b )
-FREQ=20
+#jobs=( gpt2 gpt3xl gpt3-7b )
+jobs=( gpt2 gpt3-7b )
+FREQ=1
 STEPS=1000
 
 eval "$(conda shell.bash hook)"
